@@ -1,9 +1,14 @@
-from requests import get
-import nrk_nav
-import pprint
-from requests.exceptions import RequestException
+import asyncio
+import io
+import json
 from contextlib import closing
+
 from bs4 import BeautifulSoup
+from requests import get
+from requests.exceptions import RequestException
+
+import nrk_nav
+
 
 def simple_get(url):
     """
@@ -41,37 +46,53 @@ def log_error(e):
     """
     print(e)
 
-raw_html = simple_get("https://www.nrk.no/norge/")
-html = BeautifulSoup(raw_html, 'html.parser')
-nyhet = ""
 
 nyheter = {}
-for i, li in enumerate(html.findAll('a')):
-    li_ref = li.get('href')
-    # if li_ref not in nrk_nav.nrk_nav:
-        # print(li.get('href'))
-    if li_ref not in nrk_nav.nrk_nav:
-        if "https://" in li_ref:
-            nyhet = simple_get(li_ref)
-            nyhet = BeautifulSoup(nyhet, 'html.parser')
 
-            text = []
-            for j, p in enumerate(nyhet.select('p')):
 
-                if p.get('class') is None:
-                    print(j, p.text)
-                    text.append(p.text)
-            text = ' '.join(text)
+def get_nrk_text():
+    global nyheter
+    raw_html = simple_get("https://www.nrk.no/norge/")
+    html = BeautifulSoup(raw_html, 'html.parser')
+    nyhet = ""
+    not_visited = []
+    visited = []
+    loop = asyncio.get_event_loop()
+    for li in html.findAll('a'):
+        li_ref = li.get('href')
+        if li_ref not in nrk_nav.nrk_nav:
+            if "https://" in li_ref:
+                nyhet = simple_get(li_ref)
+                if nyhet is not None:
+                    nyhet = BeautifulSoup(nyhet, 'html.parser')
 
-            author = []
-            for j, a in enumerate(nyhet.select('a')):
-                a_class = a.get('class')
-                if a_class is not None and a_class[0]  == 'author__name':
-                    print(a.text)
-                    author.append(a.text)
-            nyheter[nyhet.select('title')[0].text] = {
-                "text": text,
-                "author": author
-            }
+                    text = []
+                    for p in nyhet.select('p'):
+                        if p.get(
+                                'class') is None and p.text not in "Den som mener seg rammet av urettmessig publisering, oppfordres til å ta kontakt med redaksjonen. Pressens Faglige Utvalg (PFU) er et klageorgan oppnevnt av Norsk Presseforbund som behandler klager mot mediene i presseetiske spørsmål.":
+                            # print(p.text)
+                            text.append(p.text)
+                    text = ' '.join(text)
 
-print(nyheter)
+                    author = []
+                    for a in nyhet.select('a'):
+                        a_class = a.get('class')
+                        if a_class is not None and a_class[0] == 'author__name':
+                            # print(a.text)
+                            author.append(a.text)
+
+                    time = nyhet.select('time')
+                    if len(time) > 0:
+                        time = time[0].get('datetime')
+
+                    if author:
+                        nyheter[nyhet.select('title')[0].text] = {
+                            "text": text,
+                            "author": author,
+                            "datetime": time
+                        }
+
+
+# get_nrk_text()
+with io.open('nyheter.json', 'w', encoding='utf8') as outfile:
+    json.dump(nyheter, outfile, sort_keys=True, indent=4, ensure_ascii=False)
